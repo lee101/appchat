@@ -42,9 +42,9 @@ The Postgres addon injects `DATABASE_URL`. The app creates `appchat_runs` and `a
 Deploy the server app from a checkout when your app.nz CLI exposes the server-app deploy surface:
 
 ```bash
-app apps deploy appchat .
-app apps env set appchat APPNZ_API_KEY=pk_live_...
-app apps open appchat
+app apps deploy . \
+  --env APPNZ_API_KEY=pk_live_... \
+  --env DATABASE_URL=postgresql://...
 ```
 
 Static assets are built into `dist/`; the Node server handles `/api/*` for chat, auth, usage, audio, and payments.

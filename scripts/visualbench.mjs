@@ -3,7 +3,12 @@ import { chromium } from '@playwright/test';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
-const base = (process.argv[2] || 'http://127.0.0.1:3000').replace(/\/$/, '');
+const rawBase = process.argv[2] || 'http://127.0.0.1:3000';
+const parsedBase = new URL(rawBase);
+if (!path.posix.extname(parsedBase.pathname) && !parsedBase.pathname.endsWith('/')) {
+  parsedBase.pathname += '/';
+}
+const base = parsedBase.toString();
 const outDir = path.resolve('visualbench');
 await fs.mkdir(outDir, { recursive: true });
 

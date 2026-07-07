@@ -1,0 +1,27 @@
+name: appchat
+runtime: server
+build:
+  command: npm ci && npm run build
+run:
+  command: npm start
+  port: 3000
+output: dist
+env:
+  APPNZ_API_BASE: https://app.nz
+  APPCHAT_PUBLIC_URL: https://appchat.app.nz
+  APPCHAT_DEFAULT_MODEL: appnz/auto-fast
+  SOLANA_CLUSTER: mainnet-beta
+  SOLANA_CREDITS_PER_SOL: "100000"
+secrets:
+  - APPNZ_API_KEY
+  - APPNZ_APP_CLIENT_ID
+  - APPNZ_APP_CLIENT_SECRET
+  - SOLANA_RECEIVER_ADDRESS
+  - SOLANA_RPC_URL
+addons:
+  - type: postgres
+    plan: starter
+github:
+  repo: lee101/appchat
+  branch: main
+  autoDeploy: true

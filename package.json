@@ -1,0 +1,40 @@
+{
+  "name": "appchat",
+  "version": "0.1.0",
+  "private": false,
+  "type": "module",
+  "description": "A visual streaming AI chat game for app.nz server apps, Postgres addons, auth, credits, and Solana prepaid credits.",
+  "license": "MIT",
+  "scripts": {
+    "dev": "concurrently \"vite --host 127.0.0.1\" \"node --watch server/index.mjs\"",
+    "server": "node server/index.mjs",
+    "start": "node server/index.mjs",
+    "build": "vite build",
+    "preview": "vite preview --host 127.0.0.1",
+    "test": "vitest run",
+    "visualbench": "node scripts/visualbench.mjs"
+  },
+  "dependencies": {
+    "@vitejs/plugin-react": "^5.0.5",
+    "express": "^5.2.1",
+    "lucide-react": "^0.555.0",
+    "pg": "^8.16.3",
+    "react": "^19.2.3",
+    "react-dom": "^19.2.3",
+    "zod": "^4.2.1"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.57.0",
+    "@types/node": "^24.10.1",
+    "@types/pg": "^8.16.0",
+    "@types/react": "^19.2.7",
+    "@types/react-dom": "^19.2.3",
+    "concurrently": "^9.2.1",
+    "typescript": "^5.9.3",
+    "vite": "^7.2.7",
+    "vitest": "^4.0.16"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

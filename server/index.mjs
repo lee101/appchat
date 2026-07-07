@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { z } from 'zod';
 import { config, publicConfig } from './config.mjs';
 import { addLedger, initDb, ledgerForUser, listRuns, saveRun } from './db.mjs';
-import { appnzMe, appnzUsage, gatewayChatStream, spendCredits } from './appnz.mjs';
+import { activeAppnzAPIKey, appnzMe, appnzUsage, gatewayChatStream, spendCredits } from './appnz.mjs';
 import { createSolanaQuote, verifySolanaPayment } from './solana.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -16,8 +16,6 @@ app.use(express.json({ limit: '1mb' }));
 
 const chatSchema = z.object({
   model: z.string().min(1).max(120).optional(),
-  sector: z.string().max(80).optional(),
-  ship: z.record(z.string(), z.unknown()).optional(),
   messages: z.array(z.object({
     role: z.enum(['system', 'developer', 'user', 'assistant']),
     content: z.string().min(1).max(6000)
@@ -85,14 +83,14 @@ app.post('/api/chat', async (req, res) => {
   const system = {
     role: 'system',
     content: [
-      'You are AppChat Autopilot, the strategic narrator for a visual browser game.',
-      'Give concise tactical guidance, mention the current sector, and keep replies vivid but actionable.',
-      'When the player asks for code or deployment details, explain the app.nz API route involved.'
+      'You are AppChat, a compact streaming chat client for app.nz.',
+      'Be concise, useful, and direct.',
+      'When asked about deployment, auth, payments, or models, explain the relevant app.nz API route.'
     ].join(' ')
   };
   const state = {
     role: 'user',
-    content: `Game state: sector=${parsed.data.sector || 'unknown'} ship=${JSON.stringify(parsed.data.ship || {})}`
+    content: `Runtime context: app.nz server app, postgres=${Boolean(config.databaseUrl)}, solana=${Boolean(config.solanaReceiver)}`
   };
   const messages = [system, state, ...parsed.data.messages];
   const prompt = parsed.data.messages.map((m) => `${m.role}: ${m.content}`).join('\n');
@@ -106,13 +104,14 @@ app.post('/api/chat', async (req, res) => {
 
   let response = '';
   try {
-    await spendCredits(req, config.actionCredits, 'appchat:autopilot');
-    sse(res, 'meta', { model, demoMode: !config.appnzApiKey, userId });
-    for await (const token of gatewayChatStream({ messages, model })) {
+    await spendCredits(req, config.actionCredits, 'appchat:chat');
+    const apiKey = activeAppnzAPIKey(req);
+    sse(res, 'meta', { model, demoMode: !apiKey, userId });
+    for await (const token of gatewayChatStream({ messages, model, apiKey })) {
       response += token;
       sse(res, 'token', { text: token });
     }
-    await saveRun({ userId, model, sector: parsed.data.sector || '', prompt, response, tokens: response.split(/\s+/).filter(Boolean).length });
+    await saveRun({ userId, model, prompt, response, tokens: response.split(/\s+/).filter(Boolean).length });
     sse(res, 'done', { ok: true });
   } catch (error) {
     sse(res, 'error', { error: error.message });
@@ -127,13 +126,14 @@ app.post('/api/audio/speech', async (req, res) => {
     res.status(400).json({ error: 'text is required' });
     return;
   }
-  if (!config.appnzApiKey) {
+  const apiKey = activeAppnzAPIKey(req);
+  if (!apiKey) {
     res.status(503).json({ error: 'Set APPNZ_API_KEY to enable app.nz audio generation.' });
     return;
   }
   const upstream = await fetch(`${config.appnzBase}/v1/audio/speech`, {
     method: 'POST',
-    headers: { Authorization: `Bearer ${config.appnzApiKey}`, 'Content-Type': 'application/json' },
+    headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({
       model: req.body?.model || 'appnz-tts',
       voice: req.body?.voice || 'eve',

@@ -1,9 +1,10 @@
 # AppChat
 
-AppChat is a visual streaming AI chat game built to show how a real server app runs on app.nz:
+AppChat is a compact streaming AI chat app built to show how a real server app runs on app.nz:
 
 - OpenAI-compatible streaming chat through the app.nz model router.
 - Optional app.nz session/API-key auth lookup and usage dashboard calls.
+- Personal `APPNZ_API_KEY` mode from the browser, stored locally and never persisted server-side.
 - Postgres addon persistence through the injected `DATABASE_URL`.
 - Optional first-party app credit charging with `/api/credits/spend`.
 - Solana Pay-style prepaid credit quotes and transaction verification.

@@ -61,13 +61,12 @@ export async function spendCredits(req, amount, reason) {
 
 export async function* demoChatStream(prompt) {
   const script = [
-    'Autopilot linked in demo mode. ',
-    'The route is viable if you keep the ship inside the amber gravity lanes. ',
-    'I would burn one probe at the next junction, bank the crystal reward, ',
-    'then ask the model router for a cheaper scout pass before the boss node.'
+    'AppChat is running in demo mode. ',
+    'Add APPNZ_API_KEY on the server or paste a personal key in the UI to use the app.nz model router. ',
+    'The rest of the app still shows auth, usage, Postgres history, and payment flows.'
   ];
-  if (/danger|risk|storm/i.test(prompt)) {
-    script.splice(2, 0, 'Risk scan is elevated: shields first, loot second. ');
+  if (/deploy|host|app.nz/i.test(prompt)) {
+    script.splice(2, 0, 'Deploy with app apps deploy . and keep secrets in environment variables. ');
   }
   for (const token of script) {
     await new Promise((resolve) => setTimeout(resolve, 120));
@@ -75,8 +74,17 @@ export async function* demoChatStream(prompt) {
   }
 }
 
-export async function* gatewayChatStream({ messages, model }) {
-  if (!config.appnzApiKey) {
+export function requestAppnzAPIKey(req) {
+  return String(req?.get?.('x-appnz-api-key') || '').trim();
+}
+
+export function activeAppnzAPIKey(req) {
+  return requestAppnzAPIKey(req) || config.appnzApiKey;
+}
+
+export async function* gatewayChatStream({ messages, model, apiKey = '' }) {
+  const key = apiKey || config.appnzApiKey;
+  if (!key) {
     yield* demoChatStream(messages.map((m) => m.content).join('\n'));
     return;
   }
@@ -84,7 +92,7 @@ export async function* gatewayChatStream({ messages, model }) {
   const res = await fetch(`${config.appnzBase}/v1/chat/completions`, {
     method: 'POST',
     headers: {
-      Authorization: `Bearer ${config.appnzApiKey}`,
+      Authorization: `Bearer ${key}`,
       'Content-Type': 'application/json'
     },
     body: JSON.stringify({
@@ -92,7 +100,7 @@ export async function* gatewayChatStream({ messages, model }) {
       messages,
       stream: true,
       stream_options: { include_usage: true },
-      temperature: 0.7,
+      temperature: 0.5,
       max_tokens: 900
     })
   });

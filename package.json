@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": false,
   "type": "module",
-  "description": "A visual streaming AI chat game for app.nz server apps, Postgres addons, auth, credits, and Solana prepaid credits.",
+  "description": "A compact streaming AI chat app for app.nz server apps, Postgres, auth, API keys, credits, and Solana prepaid credits.",
   "license": "MIT",
   "scripts": {
     "dev": "concurrently \"vite --host 127.0.0.1\" \"node --watch server/index.mjs\"",

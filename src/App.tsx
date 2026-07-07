@@ -1,23 +1,25 @@
 import {
-  Activity,
   Bot,
+  CheckCircle2,
   Coins,
+  Copy,
   Database,
-  Gauge,
+  ExternalLink,
   Headphones,
-  Radio,
+  KeyRound,
+  LogIn,
   RefreshCw,
   Send,
-  Shield,
   Sparkles,
   User,
-  Wallet,
-  Zap
+  Wallet
 } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { parseSseBuffer } from './sse';
 
 type Config = {
+  appnzBase: string;
+  publicUrl: string;
   defaultModel: string;
   demoMode: boolean;
   postgresEnabled: boolean;
@@ -30,32 +32,9 @@ type ChatLine = {
   content: string;
 };
 
-type Sector = {
-  id: string;
-  name: string;
-  x: number;
-  y: number;
-  risk: number;
-  reward: number;
-  color: string;
-};
-
-const sectors: Sector[] = [
-  { id: 'dock', name: 'Dock Zero', x: 14, y: 72, risk: 1, reward: 2, color: '#5fd3bc' },
-  { id: 'glass', name: 'Glass Reef', x: 32, y: 42, risk: 3, reward: 5, color: '#ffd166' },
-  { id: 'coil', name: 'Coil Gate', x: 48, y: 64, risk: 4, reward: 7, color: '#ef476f' },
-  { id: 'halo', name: 'Halo Archive', x: 64, y: 28, risk: 2, reward: 8, color: '#72ddf7' },
-  { id: 'forge', name: 'Forge Moon', x: 82, y: 58, risk: 5, reward: 10, color: '#f4a261' }
-];
-
-const starter: ChatLine[] = [
-  {
-    role: 'assistant',
-    content: 'Pick a sector and stream a move. I will route through app.nz auto models when an API key is configured.'
-  }
-];
-
 const fallbackConfig: Config = {
+  appnzBase: 'https://app.nz',
+  publicUrl: window.location.origin,
   defaultModel: 'appnz/auto-fast',
   demoMode: true,
   postgresEnabled: false,
@@ -65,27 +44,37 @@ const fallbackConfig: Config = {
 
 const fallbackUsage = {
   demo: true,
-  credits: { total: 4200 },
-  models: { costMicros: 12500 },
+  credits: { total: 0 },
+  models: { costMicros: 0 },
   servers: { count: 0 }
 };
 
+const starter: ChatLine[] = [
+  {
+    role: 'assistant',
+    content: 'Ask anything. I stream through the app.nz model router when this app has APPNZ_API_KEY configured, or when you add your own key here.'
+  }
+];
+
+const models = ['appnz/auto-fast', 'appnz/auto', 'appnz/auto-cheap', 'openpaths/auto-fast'];
+
 export function App() {
-  const [config, setConfig] = useState<Config | null>(null);
-  const [me, setMe] = useState<{ authenticated?: boolean; user?: { email?: string; id?: string } } | null>(null);
-  const [usage, setUsage] = useState<any>(null);
+  const [config, setConfig] = useState<Config>(fallbackConfig);
+  const [me, setMe] = useState<{ authenticated?: boolean; user?: { email?: string; id?: string } }>({ authenticated: false });
+  const [usage, setUsage] = useState<any>(fallbackUsage);
   const [runs, setRuns] = useState<any[]>([]);
   const [ledger, setLedger] = useState<any[]>([]);
-  const [sector, setSector] = useState<Sector>(sectors[0]);
-  const [model, setModel] = useState('appnz/auto-fast');
-  const [input, setInput] = useState('Plan the safest jump and tell me what to spend credits on.');
+  const [model, setModel] = useState(fallbackConfig.defaultModel);
+  const [input, setInput] = useState('Give me a concise plan for shipping this app on app.nz.');
   const [lines, setLines] = useState<ChatLine[]>(starter);
   const [streaming, setStreaming] = useState(false);
-  const [ship, setShip] = useState({ hull: 91, charge: 64, heat: 18, credits: 3200 });
+  const [status, setStatus] = useState('Ready');
+  const [apiKey, setApiKey] = useState(() => localStorage.getItem('appchat.apiKey') || '');
+  const [showKey, setShowKey] = useState(false);
   const [quote, setQuote] = useState<any>(null);
   const [signature, setSignature] = useState('');
-  const [status, setStatus] = useState('Ready');
   const chatEndRef = useRef<HTMLDivElement | null>(null);
+  const inputRef = useRef<HTMLTextAreaElement | null>(null);
 
   useEffect(() => {
     void refreshAll();
@@ -94,6 +83,16 @@ export function App() {
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ block: 'end' });
   }, [lines, streaming]);
+
+  const loginUrl = useMemo(() => {
+    const next = encodeURIComponent(config.publicUrl || window.location.href);
+    return `${config.appnzBase}/login?next=${next}`;
+  }, [config.appnzBase, config.publicUrl]);
+
+  const accountUrl = `${config.appnzBase}/account`;
+  const apiKeysUrl = `${config.appnzBase}/account?section=api-keys`;
+  const usingPersonalKey = Boolean(apiKey.trim());
+  const liveRouter = usingPersonalKey || !config.demoMode;
 
   async function refreshAll() {
     const [cfg, who, bill, history] = await Promise.all([
@@ -107,40 +106,46 @@ export function App() {
     setUsage(bill);
     setRuns(history.runs || []);
     setLedger(history.ledger || []);
-    setModel(cfg.defaultModel || 'appnz/auto-fast');
+    setModel(cfg.defaultModel || fallbackConfig.defaultModel);
   }
 
-  const routePath = useMemo(() => {
-    const from = sectors[0];
-    return `M ${from.x} ${from.y} L ${sector.x} ${sector.y}`;
-  }, [sector]);
+  function saveApiKey() {
+    const trimmed = apiKey.trim();
+    if (trimmed) localStorage.setItem('appchat.apiKey', trimmed);
+    else localStorage.removeItem('appchat.apiKey');
+    setApiKey(trimmed);
+    setStatus(trimmed ? 'Personal API key saved locally' : 'Personal API key removed');
+  }
 
-  async function streamMove() {
+  async function streamChat() {
     if (!input.trim() || streaming) return;
     setStreaming(true);
-    setStatus('Streaming autopilot');
+    setStatus(liveRouter ? `Streaming ${model}` : 'Demo stream');
     const userLine: ChatLine = { role: 'user', content: input.trim() };
     setLines((prev) => [...prev, userLine, { role: 'assistant', content: '' }]);
     setInput('');
 
-    const body = JSON.stringify({
-      model,
-      sector: sector.name,
-      ship,
-      messages: [{ role: 'user', content: userLine.content }]
-    });
+    const history = [...lines, userLine]
+      .filter((line) => line.content.trim())
+      .slice(-12)
+      .map((line) => ({ role: line.role, content: line.content }));
 
     let res: Response;
     try {
-      res = await fetch('/api/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body });
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (apiKey.trim()) headers['X-AppNZ-API-Key'] = apiKey.trim();
+      res = await fetch('/api/chat', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ model, messages: history })
+      });
     } catch {
-      await localDemoMove(userLine.content);
+      await localDemoReply(userLine.content);
       return;
     }
 
     if (!res.ok || !res.body || !String(res.headers.get('content-type') || '').includes('text/event-stream')) {
-      await localDemoMove(userLine.content);
-      setStreaming(false);
+      await localDemoReply(userLine.content);
       return;
     }
 
@@ -158,18 +163,13 @@ export function App() {
           if (evt.event === 'token') setLines((prev) => patchLastAssistant(prev, data.text || ''));
           if (evt.event === 'meta') setStatus(data.demoMode ? 'Demo stream' : `Routed ${data.model}`);
           if (evt.event === 'error') setLines((prev) => patchLastAssistant(prev, `\n${data.error}`));
+          if (evt.event === 'done') setStatus('Done');
         }
       }
-      setShip((prev) => ({
-        hull: Math.max(20, prev.hull - sector.risk * 3),
-        charge: Math.max(0, prev.charge - 9 + sector.reward),
-        heat: Math.min(100, prev.heat + sector.risk * 4),
-        credits: prev.credits + sector.reward * 140
-      }));
-      setStatus('Move resolved');
       await refreshHistoryOnly();
     } finally {
       setStreaming(false);
+      inputRef.current?.focus();
     }
   }
 
@@ -179,16 +179,15 @@ export function App() {
     setLedger(history.ledger || []);
   }
 
-  async function localDemoMove(prompt: string) {
-    setStatus('Static demo stream');
+  async function localDemoReply(prompt: string) {
+    setStatus('Static demo');
     const tokens = [
-      'Static demo autopilot online. ',
-      `${sector.name} is the right visual route for this run. `,
-      /safe|safest|risk/i.test(prompt) ? 'Shields first, credits second. ' : 'Spend a probe, then bank the reward. ',
-      'Deploy the server runtime on app.nz to switch this from local demo text to the model router.'
+      'This is the local demo path. ',
+      /key|api/i.test(prompt) ? 'Add APPNZ_API_KEY in the app env or paste your personal key to route real models. ' : 'The UI is ready; connect an app.nz key to stream from the router. ',
+      'Login links, usage, Postgres history, and Solana quotes still show the production integration points.'
     ];
     for (const token of tokens) {
-      await new Promise((resolve) => setTimeout(resolve, 120));
+      await new Promise((resolve) => setTimeout(resolve, 90));
       setLines((prev) => patchLastAssistant(prev, token));
     }
     setStreaming(false);
@@ -200,9 +199,11 @@ export function App() {
     setStatus('Requesting audio');
     let res: Response;
     try {
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (apiKey.trim()) headers['X-AppNZ-API-Key'] = apiKey.trim();
       res = await fetch('/api/audio/speech', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify({ text: last.content.slice(0, 1200) })
       });
     } catch {
@@ -252,15 +253,15 @@ export function App() {
     <div className="app-shell">
       <header className="topbar">
         <div className="brand">
-          <span className="brand-mark"><Sparkles size={19} /></span>
+          <span className="brand-mark"><Sparkles size={18} /></span>
           <div>
             <h1>AppChat</h1>
-            <p>Streaming AI space run on app.nz</p>
+            <p>Compact streaming chat on app.nz</p>
           </div>
         </div>
         <div className="top-actions">
-          <StatusPill icon={<User size={15} />} label={me?.authenticated ? me.user?.email || 'Signed in' : 'Demo user'} />
-          <StatusPill icon={<Database size={15} />} label={config?.postgresEnabled ? 'Postgres' : 'Memory'} />
+          <StatusPill icon={liveRouter ? <CheckCircle2 size={15} /> : <KeyRound size={15} />} label={liveRouter ? 'Router ready' : 'Needs key'} />
+          <StatusPill icon={<Database size={15} />} label={config.postgresEnabled ? 'Postgres' : 'Memory'} />
           <button className="icon-button" title="Refresh account and history" onClick={refreshAll}>
             <RefreshCw size={17} />
           </button>
@@ -268,55 +269,26 @@ export function App() {
       </header>
 
       <main className="workspace">
-        <section className="map-panel">
-          <div className="panel-title">
-            <div>
-              <span>Starmap</span>
-              <strong>{sector.name}</strong>
-            </div>
-            <StatusPill icon={<Radio size={15} />} label={status} />
-          </div>
-          <div className="star-stage" aria-label="Interactive sector map">
-            <svg viewBox="0 0 100 100" role="img" aria-label="route map">
-              <defs>
-                <pattern id="grid" width="8" height="8" patternUnits="userSpaceOnUse">
-                  <path d="M 8 0 L 0 0 0 8" fill="none" stroke="rgba(255,255,255,.08)" strokeWidth=".3" />
-                </pattern>
-              </defs>
-              <rect width="100" height="100" fill="url(#grid)" />
-              <path d={routePath} className="route-line" />
-              {sectors.map((s) => (
-                <g key={s.id} onClick={() => setSector(s)} className={s.id === sector.id ? 'sector active' : 'sector'}>
-                  <circle cx={s.x} cy={s.y} r={s.id === sector.id ? 5.8 : 4.4} fill={s.color} />
-                  <text x={s.x > 70 ? s.x - 4 : s.x + 4} y={s.y - 5} textAnchor={s.x > 70 ? 'end' : 'start'}>{s.name}</text>
-                </g>
-              ))}
-              <circle cx="14" cy="72" r="9" className="scan-ring" />
-            </svg>
-          </div>
-          <div className="meters">
-            <Meter icon={<Shield size={16} />} label="Hull" value={ship.hull} tone="green" />
-            <Meter icon={<Zap size={16} />} label="Charge" value={ship.charge} tone="yellow" />
-            <Meter icon={<Gauge size={16} />} label="Heat" value={ship.heat} tone="red" />
-            <Meter icon={<Coins size={16} />} label="Run credits" value={Math.min(100, ship.credits / 50)} text={String(ship.credits)} tone="cyan" />
-          </div>
-        </section>
-
         <section className="chat-panel">
           <div className="panel-title">
             <div>
-              <span>Autopilot</span>
+              <span>Chat</span>
               <strong>{model}</strong>
             </div>
-            <button className="icon-button" title="Speak latest assistant message" onClick={speakLast}>
-              <Headphones size={17} />
-            </button>
+            <div className="title-actions">
+              <StatusPill icon={<Bot size={15} />} label={status} />
+              <button className="icon-button" title="Speak latest assistant message" onClick={speakLast}>
+                <Headphones size={17} />
+              </button>
+            </div>
           </div>
-          <div className="model-row">
-            {['appnz/auto-fast', 'appnz/auto', 'appnz/auto-cheap', 'openpaths/auto-fast'].map((m) => (
+
+          <div className="model-row" aria-label="Model picker">
+            {models.map((m) => (
               <button key={m} className={model === m ? 'chip selected' : 'chip'} onClick={() => setModel(m)}>{m}</button>
             ))}
           </div>
+
           <div className="transcript">
             {lines.map((line, idx) => (
               <div key={`${idx}-${line.role}`} className={`bubble ${line.role}`}>
@@ -326,50 +298,104 @@ export function App() {
             ))}
             <div ref={chatEndRef} />
           </div>
+
           <div className="composer">
-            <textarea value={input} onChange={(e) => setInput(e.target.value)} placeholder="Ask the model router for a move..." />
-            <button onClick={streamMove} disabled={streaming || !input.trim()} title="Stream move">
+            <textarea
+              ref={inputRef}
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                  e.preventDefault();
+                  void streamChat();
+                }
+              }}
+              placeholder="Message AppChat"
+            />
+            <button onClick={streamChat} disabled={streaming || !input.trim()} title="Send message">
               <Send size={17} />
-              <span>{streaming ? 'Streaming' : 'Stream'}</span>
+              <span>{streaming ? 'Streaming' : 'Send'}</span>
             </button>
           </div>
         </section>
 
-        <aside className="ops-panel">
-          <SectionTitle icon={<Activity size={16} />} label="app.nz account" />
-          <div className="stats-grid">
-            <Stat label="Credits" value={usage?.credits?.total ?? usage?.credits?.paid ?? 'demo'} />
-            <Stat label="Model spend" value={usage?.models?.costMicros ? `$${(usage.models.costMicros / 1_000_000).toFixed(4)}` : '$0.0000'} />
-            <Stat label="Servers" value={usage?.servers?.count ?? 0} />
-            <Stat label="Charge" value={config?.actionCredits ? `${config.actionCredits} cr` : 'off'} />
-          </div>
+        <aside className="side-panel">
+          <section className="side-section">
+            <SectionTitle icon={<LogIn size={16} />} label="app.nz account" />
+            <div className="account-card">
+              <div>
+                <strong>{me.authenticated ? me.user?.email || 'Signed in' : 'Not signed in'}</strong>
+                <span>{me.authenticated ? 'Using app.nz auth cookies' : 'Login to use account usage and app auth'}</span>
+              </div>
+              <a className="secondary-button" href={me.authenticated ? accountUrl : loginUrl}>
+                {me.authenticated ? 'Account' : 'Login'}
+                <ExternalLink size={14} />
+              </a>
+            </div>
+            <div className="stats-grid">
+              <Stat label="Credits" value={usage?.credits?.total ?? usage?.credits?.paid ?? 'demo'} />
+              <Stat label="Model spend" value={usage?.models?.costMicros ? `$${(usage.models.costMicros / 1_000_000).toFixed(4)}` : '$0.0000'} />
+            </div>
+          </section>
 
-          <SectionTitle icon={<Wallet size={16} />} label="Solana prepaid" />
-          <div className="wallet-box">
-            <button onClick={() => createQuote(1000)} className="secondary-button">Quote 1,000 credits</button>
-            {quote && (
-              <>
-                <div className="quote">
-                  <span>{quote.sol} SOL</span>
-                  <a href={quote.url}>Open wallet link</a>
-                </div>
-                <input value={signature} onChange={(e) => setSignature(e.target.value)} placeholder="transaction signature" />
-                <button onClick={verifyQuote} className="secondary-button">Verify payment</button>
-              </>
-            )}
-          </div>
+          <section className="side-section">
+            <SectionTitle icon={<KeyRound size={16} />} label="Use your API key" />
+            <div className="key-box">
+              <input
+                type={showKey ? 'text' : 'password'}
+                value={apiKey}
+                onChange={(e) => setApiKey(e.target.value)}
+                placeholder="APPNZ_API_KEY"
+                autoComplete="off"
+              />
+              <div className="key-actions">
+                <button className="secondary-button" onClick={() => setShowKey((v) => !v)}>{showKey ? 'Hide' : 'Show'}</button>
+                <button className="secondary-button" onClick={saveApiKey}>Save</button>
+              </div>
+              <a className="inline-link" href={apiKeysUrl}>
+                Get an API key on app.nz
+                <ExternalLink size={13} />
+              </a>
+            </div>
+          </section>
 
-          <SectionTitle icon={<Database size={16} />} label="Recent runs" />
-          <div className="history-list">
-            {runs.slice(0, 5).map((run) => (
-              <button key={run.id} onClick={() => setSector(sectors.find((s) => s.name === run.sector) || sector)}>
-                <strong>{run.sector || 'Unknown sector'}</strong>
-                <span>{run.model}</span>
+          <section className="side-section">
+            <SectionTitle icon={<Wallet size={16} />} label="Payments" />
+            <div className="wallet-box">
+              <button onClick={() => createQuote(1000)} className="secondary-button" disabled={!config.solanaEnabled}>
+                <Coins size={15} />
+                Quote 1,000 credits
               </button>
-            ))}
-            {!runs.length && <p className="muted">Run history appears here after the first stream.</p>}
-          </div>
-          {!!ledger.length && <p className="muted">{ledger.length} ledger event{ledger.length === 1 ? '' : 's'} stored.</p>}
+              {quote && (
+                <>
+                  <div className="quote">
+                    <span>{quote.sol} SOL</span>
+                    <a href={quote.url}>Open wallet link</a>
+                    <button className="icon-button compact" title="Copy payment link" onClick={() => navigator.clipboard?.writeText(quote.url)}>
+                      <Copy size={14} />
+                    </button>
+                  </div>
+                  <input value={signature} onChange={(e) => setSignature(e.target.value)} placeholder="transaction signature" />
+                  <button onClick={verifyQuote} className="secondary-button">Verify payment</button>
+                </>
+              )}
+              {!config.solanaEnabled && <p className="muted">Set SOLANA_RECEIVER_ADDRESS to enable wallet quotes.</p>}
+            </div>
+          </section>
+
+          <section className="side-section">
+            <SectionTitle icon={<Database size={16} />} label="History" />
+            <div className="history-list">
+              {runs.slice(0, 6).map((run) => (
+                <button key={run.id} onClick={() => setLines((prev) => [...prev, { role: 'assistant', content: run.response || run.prompt }])}>
+                  <strong>{run.prompt || 'Previous chat'}</strong>
+                  <span>{run.model}</span>
+                </button>
+              ))}
+              {!runs.length && <p className="muted">Recent chats appear here after the first stream.</p>}
+            </div>
+            {!!ledger.length && <p className="muted ledger-note">{ledger.length} ledger event{ledger.length === 1 ? '' : 's'} stored.</p>}
+          </section>
         </aside>
       </main>
     </div>
@@ -407,14 +433,4 @@ function SectionTitle({ icon, label }: { icon: React.ReactNode; label: string })
 
 function Stat({ label, value }: { label: string; value: string | number }) {
   return <div className="stat"><span>{label}</span><strong>{value}</strong></div>;
-}
-
-function Meter({ icon, label, value, text, tone }: { icon: React.ReactNode; label: string; value: number; text?: string; tone: string }) {
-  const clamped = Math.max(0, Math.min(100, value));
-  return (
-    <div className={`meter ${tone}`}>
-      <div className="meter-label">{icon}<span>{label}</span><strong>{text || `${Math.round(clamped)}%`}</strong></div>
-      <div className="meter-track"><span style={{ width: `${clamped}%` }} /></div>
-    </div>
-  );
 }

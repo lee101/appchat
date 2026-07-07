@@ -31,7 +31,7 @@ for (const item of cases) {
     height: document.documentElement.clientHeight,
     overflowX: document.documentElement.scrollWidth > document.documentElement.clientWidth + 1,
     buttons: document.querySelectorAll('button').length,
-    svgNodes: document.querySelectorAll('svg .sector').length
+    svgNodes: document.querySelectorAll('svg').length
   }));
   results.push({ ...item, ms: Date.now() - started, ...metrics });
   await page.close();

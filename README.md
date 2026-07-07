@@ -39,7 +39,7 @@ secrets:
 
 The Postgres addon injects `DATABASE_URL`. The app creates `appchat_runs` and `appchat_ledger` automatically on boot.
 
-Deploy from a checkout with the app.nz CLI:
+Deploy the server app from a checkout when your app.nz CLI exposes the server-app deploy surface:
 
 ```bash
 app apps deploy appchat .
@@ -48,6 +48,15 @@ app apps open appchat
 ```
 
 Static assets are built into `dist/`; the Node server handles `/api/*` for chat, auth, usage, audio, and payments.
+
+The currently published `appchat.app.nz` demo can also be deployed as a static site:
+
+```bash
+npm run build
+app sites deploy appchat dist --title "AppChat"
+```
+
+In static-only mode the UI falls back to an in-browser demo stream. The server runtime is required for live model routing, Postgres, auth, audio, and Solana verification.
 
 ## Model Router
 

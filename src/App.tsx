@@ -55,6 +55,21 @@ const starter: ChatLine[] = [
   }
 ];
 
+const fallbackConfig: Config = {
+  defaultModel: 'appnz/auto-fast',
+  demoMode: true,
+  postgresEnabled: false,
+  solanaEnabled: false,
+  actionCredits: 0
+};
+
+const fallbackUsage = {
+  demo: true,
+  credits: { total: 4200 },
+  models: { costMicros: 12500 },
+  servers: { count: 0 }
+};
+
 export function App() {
   const [config, setConfig] = useState<Config | null>(null);
   const [me, setMe] = useState<{ authenticated?: boolean; user?: { email?: string; id?: string } } | null>(null);
@@ -82,10 +97,10 @@ export function App() {
 
   async function refreshAll() {
     const [cfg, who, bill, history] = await Promise.all([
-      fetch('/api/config').then((r) => r.json()),
-      fetch('/api/me').then((r) => r.json()),
-      fetch('/api/usage').then((r) => r.json()),
-      fetch('/api/runs').then((r) => r.json())
+      fetchJson('/api/config', fallbackConfig),
+      fetchJson('/api/me', { authenticated: false }),
+      fetchJson('/api/usage', fallbackUsage),
+      fetchJson('/api/runs', { runs: [], ledger: [] })
     ]);
     setConfig(cfg);
     setMe(who);
@@ -108,20 +123,23 @@ export function App() {
     setLines((prev) => [...prev, userLine, { role: 'assistant', content: '' }]);
     setInput('');
 
-    const res = await fetch('/api/chat', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model,
-        sector: sector.name,
-        ship,
-        messages: [{ role: 'user', content: userLine.content }]
-      })
+    const body = JSON.stringify({
+      model,
+      sector: sector.name,
+      ship,
+      messages: [{ role: 'user', content: userLine.content }]
     });
 
-    if (!res.ok || !res.body) {
-      const body = await res.text();
-      setLines((prev) => patchLastAssistant(prev, `Request failed: ${body || res.status}`));
+    let res: Response;
+    try {
+      res = await fetch('/api/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body });
+    } catch {
+      await localDemoMove(userLine.content);
+      return;
+    }
+
+    if (!res.ok || !res.body || !String(res.headers.get('content-type') || '').includes('text/event-stream')) {
+      await localDemoMove(userLine.content);
       setStreaming(false);
       return;
     }
@@ -156,20 +174,41 @@ export function App() {
   }
 
   async function refreshHistoryOnly() {
-    const history = await fetch('/api/runs').then((r) => r.json());
+    const history = await fetchJson('/api/runs', { runs: [], ledger: [] });
     setRuns(history.runs || []);
     setLedger(history.ledger || []);
+  }
+
+  async function localDemoMove(prompt: string) {
+    setStatus('Static demo stream');
+    const tokens = [
+      'Static demo autopilot online. ',
+      `${sector.name} is the right visual route for this run. `,
+      /safe|safest|risk/i.test(prompt) ? 'Shields first, credits second. ' : 'Spend a probe, then bank the reward. ',
+      'Deploy the server runtime on app.nz to switch this from local demo text to the model router.'
+    ];
+    for (const token of tokens) {
+      await new Promise((resolve) => setTimeout(resolve, 120));
+      setLines((prev) => patchLastAssistant(prev, token));
+    }
+    setStreaming(false);
   }
 
   async function speakLast() {
     const last = [...lines].reverse().find((line) => line.role === 'assistant' && line.content.trim());
     if (!last) return;
     setStatus('Requesting audio');
-    const res = await fetch('/api/audio/speech', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text: last.content.slice(0, 1200) })
-    });
+    let res: Response;
+    try {
+      res = await fetch('/api/audio/speech', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: last.content.slice(0, 1200) })
+      });
+    } catch {
+      setStatus('Audio needs server runtime');
+      return;
+    }
     if (!res.ok) {
       setStatus('Audio needs APPNZ_API_KEY');
       return;
@@ -181,11 +220,17 @@ export function App() {
   }
 
   async function createQuote(credits: number) {
-    const res = await fetch('/api/payments/solana/quote', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ credits })
-    });
+    let res: Response;
+    try {
+      res = await fetch('/api/payments/solana/quote', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ credits })
+      });
+    } catch {
+      setStatus('Solana quote needs server runtime');
+      return;
+    }
     const body = await res.json();
     setQuote(body.quote || null);
     if (body.error) setStatus(body.error);
@@ -329,6 +374,16 @@ export function App() {
       </main>
     </div>
   );
+}
+
+async function fetchJson<T>(url: string, fallback: T): Promise<T> {
+  try {
+    const res = await fetch(url);
+    if (!res.ok || !String(res.headers.get('content-type') || '').includes('application/json')) return fallback;
+    return await res.json();
+  } catch {
+    return fallback;
+  }
 }
 
 function patchLastAssistant(lines: ChatLine[], token: string) {
